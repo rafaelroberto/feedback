@@ -1119,49 +1119,49 @@ function generatePdf(){
 }
 </script>
 
-<!-- ================= FIREBASE ================= -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+<!-- ================= FIREBASE (SDK "compat", tags <script> normais, sem import de módulo) ================= -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js" onerror="window.__fbScriptFailed=true"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js" onerror="window.__fbScriptFailed=true"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js" onerror="window.__fbScriptFailed=true"></script>
 
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU",
-  authDomain: "cadencia-1f091.firebaseapp.com",
-  projectId: "cadencia-1f091",
-  storageBucket: "cadencia-1f091.firebasestorage.app",
-  messagingSenderId: "766309298194",
-  appId: "1:766309298194:web:fb9342d3ee532c0b3d68cb"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-
-let userDocRef = null;
-
+<script>
 function showOverlayError(title, msg){
-  document.getElementById('fbOverlayTitle').textContent = title;
-  document.getElementById('fbOverlayMsg').textContent = msg;
+  var t = document.getElementById('fbOverlayTitle');
+  var m = document.getElementById('fbOverlayMsg');
+  if(t && m){ t.textContent = title; m.textContent = msg; }
   document.getElementById('fbOverlay').style.display = 'flex';
 }
 
-if(CONFIG_IS_PLACEHOLDER){
-  showOverlayError('Firebase não configurado', 'Cole a configuração do seu app web no bloco firebaseConfig, dentro do código desta página.');
+if(window.__fbScriptFailed || typeof firebase === 'undefined'){
+  showOverlayError(
+    'Os arquivos do Firebase não carregaram',
+    'O navegador não conseguiu baixar os scripts de www.gstatic.com — geralmente é um bloqueador de anúncios/rastreadores (uBlock, Brave Shield, extensão de privacidade) ou uma rede corporativa restrita. Desative o bloqueador para este site, ou tente em outra rede/navegador, e recarregue a página.'
+  );
 } else {
+  const firebaseConfig = {
+    apiKey: "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU",
+    authDomain: "cadencia-1f091.firebaseapp.com",
+    projectId: "cadencia-1f091",
+    storageBucket: "cadencia-1f091.firebasestorage.app",
+    messagingSenderId: "766309298194",
+    appId: "1:766309298194:web:fb9342d3ee532c0b3d68cb"
+  };
+
   try{
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+    let userDocRef = null;
 
     // Um documento por usuário (identificado pelo uid anônimo), com todos os dados dentro.
     // Ex: lifeapps1on1/{uid} = { collaborators: [...], oneones: { colabId: [...] }, seeded_v1: true }
     window.fbGetData = async function(key, fallback){
-      const snap = await getDoc(userDocRef);
-      if(!snap.exists()) return fallback;
+      const snap = await userDocRef.get();
+      if(!snap.exists) return fallback;
       const data = snap.data();
       if(key.includes(':')){
-        const [top, sub] = key.split(':');
+        const parts = key.split(':');
+        const top = parts[0], sub = parts[1];
         return (data[top] && data[top][sub] !== undefined) ? data[top][sub] : fallback;
       }
       return data[key] !== undefined ? data[key] : fallback;
@@ -1169,36 +1169,39 @@ if(CONFIG_IS_PLACEHOLDER){
 
     window.fbSetData = async function(key, value){
       if(key.includes(':')){
-        const dottedPath = key.replace(':', '.');
-        await updateDoc(userDocRef, {[dottedPath]: value}).catch(async ()=>{
-          // se o campo 'oneones' ainda não existe como map, cria antes de tentar de novo
-          const [top, sub] = key.split(':');
-          await setDoc(userDocRef, {[top]: {[sub]: value}}, {merge:true});
-        });
+        const parts = key.split(':');
+        const top = parts[0], sub = parts[1];
+        const dottedPath = top + '.' + sub;
+        try{
+          await userDocRef.update({[dottedPath]: value});
+        }catch(e){
+          // se o campo 'oneones' ainda não existe como map, cria antes
+          await userDocRef.set({[top]: {[sub]: value}}, {merge:true});
+        }
       } else {
-        await setDoc(userDocRef, {[key]: value}, {merge:true});
+        await userDocRef.set({[key]: value}, {merge:true});
       }
     };
 
     window.firebaseReady = new Promise((resolve, reject)=>{
       let settled = false;
-      onAuthStateChanged(auth, async (user)=>{
+      auth.onAuthStateChanged(async (user)=>{
         if(user){
           settled = true;
-          userDocRef = doc(db, 'lifeapps1on1', user.uid);
-          await setDoc(userDocRef, {}, {merge:true}); // garante que o documento existe
+          userDocRef = db.collection('lifeapps1on1').doc(user.uid);
+          await userDocRef.set({}, {merge:true}); // garante que o documento existe
           resolve(user);
           if(window.init) window.init();
         }
       });
-      signInAnonymously(auth).catch(err=>{
+      auth.signInAnonymously().catch(err=>{
         settled = true;
         showOverlayError('Não foi possível conectar', 'Verifique se o método de login "Anônimo" está ativado em Authentication → Sign-in method, no console do Firebase. Detalhe: ' + err.message);
         reject(err);
       });
       setTimeout(()=>{
         if(!settled){
-          showOverlayError('A autenticação não respondeu', 'O SDK carregou, mas o login não terminou. Confira: (1) se o Firestore Database foi criado no projeto, (2) se o método "Anônimo" está ativado em Authentication → Sign-in method, e (3) se o projectId em firebaseConfig é exatamente o do seu projeto. Abra o console do navegador (F12 → Console) para ver o erro técnico.');
+          showOverlayError('A autenticação não respondeu', 'O SDK carregou, mas o login não terminou. Confira: (1) se o Firestore Database foi criado no projeto (Build → Firestore Database), (2) se o método "Anônimo" está ativado em Authentication → Sign-in method, e (3) se este domínio está autorizado em Authentication → Settings → Domínios autorizados. Abra o console do navegador (F12 → Console) para o erro técnico exato.');
         }
       }, 9000);
     });
@@ -1206,21 +1209,6 @@ if(CONFIG_IS_PLACEHOLDER){
     showOverlayError('Erro ao iniciar o Firebase', e.message);
   }
 }
-</script>
-
-<script>
-  // Fallback: se o módulo do Firebase nem chegou a carregar (ex: script externo bloqueado
-  // pela pré-visualização), avisa depois de alguns segundos em vez de travar em silêncio.
-  setTimeout(function(){
-    if(typeof window.firebaseReady === 'undefined'){
-      var t = document.getElementById('fbOverlayTitle');
-      var m = document.getElementById('fbOverlayMsg');
-      if(t && m){
-        t.textContent = 'O SDK do Firebase não carregou';
-        m.textContent = 'Isso costuma acontecer quando esta página é aberta dentro de uma pré-visualização que bloqueia scripts externos. Baixe o arquivo .html e abra-o diretamente no navegador (fora do Claude). Se persistir, veja o erro exato no console (F12 → Console).';
-      }
-    }
-  }, 9000);
 </script>
 </body>
 </html>
