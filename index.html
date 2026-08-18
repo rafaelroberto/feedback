@@ -561,7 +561,6 @@ async function init(){
     await setData('seeded_v1', true);
   }
 
-  renderSidebar();
   showView('equipe');
   document.getElementById('fbOverlay').style.display = 'none';
 }
@@ -647,11 +646,19 @@ function initials(name){
 }
 
 /* ================= SIDEBAR ================= */
+let _sidebarRenderToken = 0;
 async function renderSidebar(){
+  const myToken = ++_sidebarRenderToken;
   const list = document.getElementById('collabList');
-  list.innerHTML = '';
+  const rows = [];
   for(const c of collaborators){
     const info = await getCadenceInfo(c);
+    if(myToken !== _sidebarRenderToken) return; // uma chamada mais nova já assumiu — descarta esta
+    rows.push({c, info});
+  }
+  if(myToken !== _sidebarRenderToken) return;
+  list.innerHTML = '';
+  for(const {c, info} of rows){
     const div = document.createElement('div');
     div.className = 'collab-card' + (c.id===currentCollabId ? ' active' : '');
     div.onclick = () => showProfile(c.id);
@@ -811,7 +818,6 @@ async function saveCollab(){
   }
   await setData('collaborators', collaborators);
   closeCollabModal();
-  renderSidebar();
   if(editingCollabId){ showProfile(editingCollabId); }
   else { showView('equipe'); }
 }
