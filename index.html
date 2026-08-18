@@ -262,6 +262,46 @@
     .form-grid{grid-template-columns:1fr;}
     .ninebox-grid{grid-template-columns:26px repeat(3,minmax(90px,1fr));}
   }
+
+  .tl-export-btn{
+    margin-left:auto; background:none; border:1px solid var(--border); color:var(--text-faint);
+    font-size:11px; padding:4px 10px; border-radius:100px; font-weight:600;
+  }
+  .tl-export-btn:hover{color:var(--accent); border-color:var(--accent);}
+
+  .export-check{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--border);}
+  .export-check:last-of-type{border-bottom:none;}
+  .export-check input{width:auto; margin-top:2px; accent-color:var(--accent);}
+  .export-check .ec-label{font-size:13px; font-weight:600; color:var(--text);}
+  .export-check .ec-sub{font-size:11px; color:var(--text-faint); margin-top:1px;}
+  .modal-wide{width:420px;}
+
+  /* PRINT AREA — off-screen until printed */
+  #printArea{
+    position:absolute; left:-99999px; top:0; width:760px;
+    background:#fff; color:#1A1A1A; font-family:'Inter',sans-serif; padding:50px;
+  }
+  #printArea .p-letterhead{display:flex; justify-content:space-between; align-items:flex-end; border-bottom:2px solid #1A1A1A; padding-bottom:14px; margin-bottom:26px;}
+  #printArea .p-brand{font-family:'Sora',sans-serif; font-weight:800; font-size:15px; letter-spacing:.02em;}
+  #printArea .p-brand span{color:#5B8CFF;}
+  #printArea .p-doctype{font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.08em;}
+  #printArea h1{font-family:'Sora',sans-serif; font-size:22px; margin-bottom:4px;}
+  #printArea .p-meta{font-size:12.5px; color:#555; margin-bottom:28px;}
+  #printArea .p-meta b{color:#1A1A1A;}
+  #printArea .p-section{margin-bottom:22px; page-break-inside:avoid;}
+  #printArea .p-label{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:#5B8CFF; font-weight:700; margin-bottom:6px;}
+  #printArea .p-text{font-size:13.5px; line-height:1.65; white-space:pre-wrap;}
+  #printArea .p-actions{list-style:none; padding:0; margin:0;}
+  #printArea .p-actions li{font-size:13px; padding:8px 0; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:12px;}
+  #printArea .p-actions li:last-child{border-bottom:none;}
+  #printArea .p-actions .a-who{font-size:11.5px; color:#777;}
+  #printArea .p-footer{margin-top:44px; padding-top:14px; border-top:1px solid #ddd; font-size:10.5px; color:#999; display:flex; justify-content:space-between;}
+
+  @media print{
+    body *{visibility:hidden;}
+    #printArea, #printArea *{visibility:visible;}
+    #printArea{position:absolute; left:0; top:0; width:100%; padding:20px 36px;}
+  }
 </style>
 </head>
 <body>
@@ -437,17 +477,38 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="exportModal">
+  <div class="modal modal-wide">
+    <h3>Exportar para o colaborador</h3>
+    <div class="hint" style="margin-bottom:14px;">Selecione o que deve ir no PDF enviado. Suas anotações internas ficam de fora por padrão.</div>
+    <div id="exportChecks"></div>
+    <div class="save-bar">
+      <button class="btn btn-ghost" onclick="closeExportModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="generatePdf()">Gerar PDF</button>
+    </div>
+  </div>
+</div>
+
+<div id="printArea"></div>
+
+<div id="fbOverlay" style="position:fixed; inset:0; background:#12161D; z-index:100; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; font-family:'Inter',sans-serif; color:#8891A3;">
+  <div style="font-family:'Sora',sans-serif; color:#E7E9EE; font-size:15px;" id="fbOverlayTitle">Conectando ao Firebase…</div>
+  <div style="font-size:12.5px; max-width:340px; text-align:center; line-height:1.6;" id="fbOverlayMsg">Autenticando e carregando seus dados.</div>
+</div>
+
 <script>
-/* ================= STORAGE HELPERS ================= */
+/* ================= STORAGE HELPERS (Firebase) ================= */
 async function getData(key, fallback){
   try{
-    const r = await window.storage.get(key, false);
-    return r ? JSON.parse(r.value) : fallback;
-  }catch(e){ return fallback; }
+    await window.firebaseReady;
+    return await window.fbGetData(key, fallback);
+  }catch(e){ console.error('firebase get error', e); return fallback; }
 }
 async function setData(key, value){
-  try{ await window.storage.set(key, JSON.stringify(value), false); }
-  catch(e){ console.error('storage error', e); }
+  try{
+    await window.firebaseReady;
+    await window.fbSetData(key, value);
+  }catch(e){ console.error('firebase set error', e); }
 }
 
 /* ================= STATE ================= */
@@ -455,6 +516,16 @@ let collaborators = [];
 let currentCollabId = null;
 let editingOneOneId = null; // null = novo registro
 let actionRowCount = 0;
+let currentEntries = [];
+let exportEntryId = null;
+
+const EXPORT_FIELDS = [
+  {key:'pauta', label:'Pauta discutida', sub:'Temas conversados na reunião', def:true},
+  {key:'feedbackDado', label:'Feedback dado a você', sub:'O que foi reforçado ou apontado como melhoria', def:true},
+  {key:'acoes', label:'Plano de ação', sub:'Combinados, responsáveis e prazos', def:true},
+  {key:'feedbackRecebido', label:'Feedback recebido', sub:'Registro do que o colaborador trouxe na conversa', def:false},
+  {key:'obs', label:'Observações gerais', sub:'Notas adicionais do gestor', def:false},
+];
 
 const NB_LABELS_PERF = ['Abaixo do esperado','Dentro do esperado','Acima do esperado'];
 const NB_LABELS_POT  = ['Baixo','Médio','Alto'];
@@ -492,7 +563,10 @@ async function init(){
 
   renderSidebar();
   showView('equipe');
+  document.getElementById('fbOverlay').style.display = 'none';
 }
+window.init = init; // chamado pelo módulo Firebase assim que a autenticação terminar
+
 
 function uid(){ return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
@@ -809,6 +883,7 @@ async function showProfile(id){
     ? `${info.entries.length} registro(s), do mais recente ao mais antigo`
     : 'Nenhum 1:1 registrado ainda';
 
+  currentEntries = info.entries;
   const tl = document.getElementById('timeline');
   if(info.entries.length===0){
     tl.innerHTML = `<div class="empty-state"><div class="big">🗒️</div><p>Registre o primeiro 1:1 com ${escapeHtml(c.nome)} para começar o histórico.</p></div>`;
@@ -825,6 +900,9 @@ async function showProfile(id){
           <div class="tl-head">
             <span class="tl-type">${typeLabel}</span>
             <span class="tl-time">${e.time || ''}</span>
+            <button class="tl-export-btn" onclick="openExportModal('${e.id}')">⤓ Exportar PDF</button>
+            <button class="tl-export-btn" onclick="openOneOneForm('${e.id}')">✎ Editar</button>
+            <button class="tl-export-btn" style="color:var(--danger); border-color:transparent;" onclick="deleteOneOne('${e.id}')">✕ Excluir</button>
           </div>
           ${e.pauta ? `<div class="tl-section"><div class="tl-label">Pauta</div><div class="tl-text">${escapeHtml(e.pauta)}</div></div>` : ''}
           ${e.feedbackDado ? `<div class="tl-section"><div class="tl-label">Feedback dado</div><div class="tl-text">${escapeHtml(e.feedbackDado)}</div></div>` : ''}
@@ -838,32 +916,40 @@ async function showProfile(id){
 }
 
 /* ================= 1:1 FORM ================= */
-function openOneOneForm(){
-  editingOneOneId = null;
+function openOneOneForm(entryId){
   const c = collaborators.find(x=>x.id===currentCollabId);
   if(!c) return;
+  const entry = entryId ? currentEntries.find(e=>e.id===entryId) : null;
+  editingOneOneId = entry ? entry.id : null;
 
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-form').classList.add('active');
 
-  document.getElementById('formEyebrow').textContent = 'Novo registro';
+  document.getElementById('formEyebrow').textContent = entry ? 'Editando registro' : 'Novo registro';
   document.getElementById('formTitle').textContent = '1:1 — ' + c.nome;
-  document.getElementById('f-date').value = todayISO();
-  document.getElementById('f-time').value = nowHM();
-  document.getElementById('f-pauta').value = '';
-  document.getElementById('f-feedback-dado').value = '';
-  document.getElementById('f-feedback-recebido').value = '';
-  document.getElementById('f-obs').value = '';
+  document.getElementById('f-date').value = entry ? entry.date : todayISO();
+  document.getElementById('f-time').value = entry ? (entry.time||nowHM()) : nowHM();
+  document.getElementById('f-pauta').value = entry ? (entry.pauta||'') : '';
+  document.getElementById('f-feedback-dado').value = entry ? (entry.feedbackDado||'') : '';
+  document.getElementById('f-feedback-recebido').value = entry ? (entry.feedbackRecebido||'') : '';
+  document.getElementById('f-obs').value = entry ? (entry.obs||'') : '';
   document.getElementById('actionRows').innerHTML = '';
   actionRowCount = 0;
-  addActionRow();
+  if(entry && entry.acoes && entry.acoes.length){
+    entry.acoes.forEach(a=>addActionRow(a));
+  } else {
+    addActionRow();
+  }
 
-  currentNbPerf = c.nineBox ? c.nineBox.perf : null;
-  currentNbPot = c.nineBox ? c.nineBox.pot : null;
+  currentNbPerf = entry && entry.nineBoxAtRegistro ? entry.nineBoxAtRegistro.perf : (c.nineBox ? c.nineBox.perf : null);
+  currentNbPot = entry && entry.nineBoxAtRegistro ? entry.nineBoxAtRegistro.pot : (c.nineBox ? c.nineBox.pot : null);
   renderNbPills();
 
+  currentType = entry ? entry.tipo : 'recorrente';
   getCadenceInfo(c).then(info=>{
-    currentType = (info.onboarding && info.nextCheckpoint) ? (info.nextCheckpoint.n+'dias') : 'recorrente';
+    if(!entry){
+      currentType = (info.onboarding && info.nextCheckpoint) ? (info.nextCheckpoint.n+'dias') : 'recorrente';
+    }
     renderTypePills(info);
   });
 }
@@ -917,8 +1003,9 @@ async function saveOneOne(){
     prazo: row.querySelector('.ar-prazo').value,
   })).filter(a=>a.acao);
 
-  const entry = {
-    id: uid(),
+  const list = await getOneOnes(c.id);
+
+  const entryData = {
     date,
     time: document.getElementById('f-time').value,
     tipo: currentType,
@@ -927,10 +1014,15 @@ async function saveOneOne(){
     feedbackRecebido: document.getElementById('f-feedback-recebido').value.trim(),
     acoes,
     obs: document.getElementById('f-obs').value.trim(),
+    nineBoxAtRegistro: (currentNbPerf!==null && currentNbPot!==null) ? {perf:currentNbPerf, pot:currentNbPot} : null,
   };
 
-  const list = await getOneOnes(c.id);
-  list.push(entry);
+  if(editingOneOneId){
+    const idx = list.findIndex(e=>e.id===editingOneOneId);
+    if(idx > -1) list[idx] = {...list[idx], ...entryData};
+  } else {
+    list.push({id: uid(), ...entryData});
+  }
   await saveOneOnes(c.id, list);
 
   if(currentNbPerf !== null && currentNbPot !== null){
@@ -938,10 +1030,172 @@ async function saveOneOne(){
     await setData('collaborators', collaborators);
   }
 
+  editingOneOneId = null;
   showProfile(c.id);
 }
 
-init();
+async function deleteOneOne(entryId){
+  const c = collaborators.find(x=>x.id===currentCollabId);
+  if(!c) return;
+  if(!confirm('Excluir este registro de 1:1? Essa ação não pode ser desfeita.')) return;
+  let list = await getOneOnes(c.id);
+  list = list.filter(e=>e.id!==entryId);
+  await saveOneOnes(c.id, list);
+  showProfile(c.id);
+}
+
+/* ================= EXPORT PDF ================= */
+function openExportModal(entryId){
+  exportEntryId = entryId;
+  const entry = currentEntries.find(e=>e.id===entryId);
+  if(!entry) return;
+
+  const wrap = document.getElementById('exportChecks');
+  wrap.innerHTML = EXPORT_FIELDS.map(f=>{
+    const hasContent = f.key==='acoes' ? (entry.acoes||[]).some(a=>a.acao) : !!entry[f.key];
+    return `
+    <label class="export-check" style="${hasContent?'':'opacity:.4;'}">
+      <input type="checkbox" id="ex-${f.key}" ${f.def && hasContent ? 'checked' : ''} ${hasContent ? '' : 'disabled'}>
+      <div>
+        <div class="ec-label">${f.label}${hasContent?'':' (vazio)'}</div>
+        <div class="ec-sub">${f.sub}</div>
+      </div>
+    </label>`;
+  }).join('');
+
+  document.getElementById('exportModal').classList.add('active');
+}
+function closeExportModal(){
+  document.getElementById('exportModal').classList.remove('active');
+  exportEntryId = null;
+}
+
+function generatePdf(){
+  const c = collaborators.find(x=>x.id===currentCollabId);
+  const entry = currentEntries.find(e=>e.id===exportEntryId);
+  if(!c || !entry) return;
+
+  const typeLabel = TYPE_DEFS.find(t=>t.id===entry.tipo)?.label || entry.tipo;
+  const d = fmtDateFull(entry.date);
+
+  let sections = '';
+  EXPORT_FIELDS.forEach(f=>{
+    const box = document.getElementById('ex-'+f.key);
+    if(!box || !box.checked) return;
+
+    if(f.key === 'acoes'){
+      const list = (entry.acoes||[]).filter(a=>a.acao);
+      if(!list.length) return;
+      sections += `<div class="p-section">
+        <div class="p-label">Plano de ação</div>
+        <ul class="p-actions">
+          ${list.map(a=>`<li><span>${escapeHtml(a.acao)}</span><span class="a-who">${a.responsavel?escapeHtml(a.responsavel):''}${a.prazo?' · até '+fmtDateFull(a.prazo):''}</span></li>`).join('')}
+        </ul>
+      </div>`;
+    } else if(entry[f.key]){
+      sections += `<div class="p-section">
+        <div class="p-label">${f.label}</div>
+        <div class="p-text">${escapeHtml(entry[f.key])}</div>
+      </div>`;
+    }
+  });
+
+  document.getElementById('printArea').innerHTML = `
+    <div class="p-letterhead">
+      <div class="p-brand">Life<span>Apps</span></div>
+      <div class="p-doctype">Registro de 1:1 · ${typeLabel}</div>
+    </div>
+    <h1>Resumo do 1:1 — ${escapeHtml(c.nome)}</h1>
+    <div class="p-meta"><b>${d}</b>${entry.time ? ' às ' + entry.time : ''}</div>
+    ${sections || '<div class="p-text" style="color:#999;">Nenhum item selecionado.</div>'}
+    <div class="p-footer">
+      <span>Documento gerado a partir da cadência de 1:1 — uso interno LifeApps</span>
+      <span>${todayISO().split('-').reverse().join('/')}</span>
+    </div>
+  `;
+
+  closeExportModal();
+  setTimeout(()=>window.print(), 80);
+}
+</script>
+
+<!-- ================= FIREBASE ================= -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+
+// ⬇️ COLE AQUI a config do seu app web (Firebase Console → Configurações do projeto → Seus apps → SDK)
+const firebaseConfig = {
+  apiKey: "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU",
+  authDomain: "cadencia-1f091.firebaseapp.com",
+  projectId: "cadencia-1f091",
+  storageBucket: "cadencia-1f091.firebasestorage.app",
+  messagingSenderId: "766309298194",
+  appId: "1:766309298194:web:fb9342d3ee532c0b3d68cb"
+
+const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey === "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU";
+
+let userDocRef = null;
+
+function showOverlayError(title, msg){
+  document.getElementById('fbOverlayTitle').textContent = title;
+  document.getElementById('fbOverlayMsg').textContent = msg;
+  document.getElementById('fbOverlay').style.display = 'flex';
+}
+
+if(CONFIG_IS_PLACEHOLDER){
+  showOverlayError('Firebase não configurado', 'Cole a configuração do seu app web no bloco firebaseConfig, dentro do código desta página.');
+} else {
+  try{
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // Um documento por usuário (identificado pelo uid anônimo), com todos os dados dentro.
+    // Ex: lifeapps1on1/{uid} = { collaborators: [...], oneones: { colabId: [...] }, seeded_v1: true }
+    window.fbGetData = async function(key, fallback){
+      const snap = await getDoc(userDocRef);
+      if(!snap.exists()) return fallback;
+      const data = snap.data();
+      if(key.includes(':')){
+        const [top, sub] = key.split(':');
+        return (data[top] && data[top][sub] !== undefined) ? data[top][sub] : fallback;
+      }
+      return data[key] !== undefined ? data[key] : fallback;
+    };
+
+    window.fbSetData = async function(key, value){
+      if(key.includes(':')){
+        const dottedPath = key.replace(':', '.');
+        await updateDoc(userDocRef, {[dottedPath]: value}).catch(async ()=>{
+          // se o campo 'oneones' ainda não existe como map, cria antes de tentar de novo
+          const [top, sub] = key.split(':');
+          await setDoc(userDocRef, {[top]: {[sub]: value}}, {merge:true});
+        });
+      } else {
+        await setDoc(userDocRef, {[key]: value}, {merge:true});
+      }
+    };
+
+    window.firebaseReady = new Promise((resolve, reject)=>{
+      onAuthStateChanged(auth, async (user)=>{
+        if(user){
+          userDocRef = doc(db, 'lifeapps1on1', user.uid);
+          await setDoc(userDocRef, {}, {merge:true}); // garante que o documento existe
+          resolve(user);
+          if(window.init) window.init();
+        }
+      });
+      signInAnonymously(auth).catch(err=>{
+        showOverlayError('Não foi possível conectar', 'Verifique se o método de login "Anônimo" está ativado em Authentication → Sign-in method, no console do Firebase. Detalhe: ' + err.message);
+        reject(err);
+      });
+    });
+  } catch(e){
+    showOverlayError('Erro ao iniciar o Firebase', e.message);
+  }
+}
 </script>
 </body>
 </html>
