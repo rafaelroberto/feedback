@@ -1127,14 +1127,15 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gsta
 
 // ⬇️ COLE AQUI a config do seu app web (Firebase Console → Configurações do projeto → Seus apps → SDK)
 const firebaseConfig = {
-  apiKey: "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU",
-  authDomain: "cadencia-1f091.firebaseapp.com",
-  projectId: "cadencia-1f091",
-  storageBucket: "cadencia-1f091.firebasestorage.app",
-  messagingSenderId: "766309298194",
-  appId: "1:766309298194:web:fb9342d3ee532c0b3d68cb"
+  apiKey: "COLE_SUA_API_KEY",
+  authDomain: "SEU_PROJETO.firebaseapp.com",
+  projectId: "SEU_PROJETO",
+  storageBucket: "SEU_PROJETO.appspot.com",
+  messagingSenderId: "COLE_AQUI",
+  appId: "COLE_AQUI"
+};
 
-const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey === "AIzaSyA94HQOdQ_PU4f3P6i1PnBOU8bFlOG6xdU";
+const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey === "COLE_SUA_API_KEY";
 
 let userDocRef = null;
 
@@ -1179,8 +1180,10 @@ if(CONFIG_IS_PLACEHOLDER){
     };
 
     window.firebaseReady = new Promise((resolve, reject)=>{
+      let settled = false;
       onAuthStateChanged(auth, async (user)=>{
         if(user){
+          settled = true;
           userDocRef = doc(db, 'lifeapps1on1', user.uid);
           await setDoc(userDocRef, {}, {merge:true}); // garante que o documento existe
           resolve(user);
@@ -1188,14 +1191,35 @@ if(CONFIG_IS_PLACEHOLDER){
         }
       });
       signInAnonymously(auth).catch(err=>{
+        settled = true;
         showOverlayError('Não foi possível conectar', 'Verifique se o método de login "Anônimo" está ativado em Authentication → Sign-in method, no console do Firebase. Detalhe: ' + err.message);
         reject(err);
       });
+      setTimeout(()=>{
+        if(!settled){
+          showOverlayError('A autenticação não respondeu', 'O SDK carregou, mas o login não terminou. Confira: (1) se o Firestore Database foi criado no projeto, (2) se o método "Anônimo" está ativado em Authentication → Sign-in method, e (3) se o projectId em firebaseConfig é exatamente o do seu projeto. Abra o console do navegador (F12 → Console) para ver o erro técnico.');
+        }
+      }, 9000);
     });
   } catch(e){
     showOverlayError('Erro ao iniciar o Firebase', e.message);
   }
 }
+</script>
+
+<script>
+  // Fallback: se o módulo do Firebase nem chegou a carregar (ex: script externo bloqueado
+  // pela pré-visualização), avisa depois de alguns segundos em vez de travar em silêncio.
+  setTimeout(function(){
+    if(typeof window.firebaseReady === 'undefined'){
+      var t = document.getElementById('fbOverlayTitle');
+      var m = document.getElementById('fbOverlayMsg');
+      if(t && m){
+        t.textContent = 'O SDK do Firebase não carregou';
+        m.textContent = 'Isso costuma acontecer quando esta página é aberta dentro de uma pré-visualização que bloqueia scripts externos. Baixe o arquivo .html e abra-o diretamente no navegador (fora do Claude). Se persistir, veja o erro exato no console (F12 → Console).';
+      }
+    }
+  }, 9000);
 </script>
 </body>
 </html>
